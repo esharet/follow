@@ -445,7 +445,7 @@ arm_and_takeoff(5)
 
 The example is completing. LAND at current location.
 """
-vehicle.mode=VehicleMode("GUIDED_NOGPS")
+
 # currentLocation = vehicle.location.global_relative_frame
 # targetLocation = get_location_metres(currentLocation, 30, 30)
 
@@ -453,22 +453,23 @@ pid = PID(Kp=0.5, Ki=0.000, Kd=0, output_limits=(-25, 25))
 offset = 10
 
 while True:
-    # print(180*vehicle.attitude.roll/3.14, 180 *
-    #       vehicle.attitude.pitch/3.14, 180*vehicle.attitude.yaw/3.14)
+    print(180*vehicle.attitude.roll/3.14, 180 *
+          vehicle.attitude.pitch/3.14, 180*vehicle.attitude.yaw/3.14)
 
     currentLocation = vehicle.location.global_frame
-    targetLocation = get_location_metres(leader_vehicle.location.global_frame, offset, 0)
-    bearing = get_bearing(currentLocation, targetLocation)
-    distance = get_distance_metres(currentLocation, targetLocation)
+    # targetLocation = get_location_metres(
+    #     leader_vehicle.location.global_frame, offset, 0)
+    # bearing = get_bearing(currentLocation, targetLocation)
+    # distance = get_distance_metres(currentLocation, targetLocation)
 
-    # (x, y, z) = get_vector_meters(
-    #     leader_vehicle.location.global_frame, currentLocation)
-    # print(f"x: [{x}], y: [{y}], z: [{z}]")
+    (x, y, z) = get_vector_meters(
+        leader_vehicle.location.global_frame, currentLocation)
+    print(f"x: [{x}], y: [{y}], z: [{z}]")
 
-    speed = -pid(distance)
-    velocity_x = speed*math.cos(math.pi*bearing/180)
-    velocity_y = speed*math.sin(math.pi*bearing/180)
-    velocity_z = 0
+    # speed = -pid(distance)
+    # velocity_x = speed*math.cos(math.pi*bearing/180)
+    # velocity_y = speed*math.sin(math.pi*bearing/180)
+    # velocity_z = 0
 
     # print(f'Bearing, {bearing:5.0f}, Distance: {distance:5.1f} Vx: {velocity_x:5.1f}, Vy: {velocity_y:5.1f}' )
 
@@ -482,19 +483,9 @@ while True:
     #     # x, y, z acceleration (not supported yet, ignored in GCS_Mavlink)
     #     0, 0, 0,
     #     0, 0)    # yaw, yaw_rate (not supported yet, ignored in GCS_Mavlink)
-    msg = vehicle.message_factory.se
-        (
-        0,       # time_boot_ms (not used)
-        0, 0,    # target system, target component
-        mavutil.mavlink.MAV_FRAME_LOCAL_NED,  # frame
-        0b0000111111000111,  # type_mask (only speeds enabled)
-        0, 0, 20,  # x, y, z positions (not used)
-        velocity_x, velocity_y, velocity_z,  # x, y, z velocity in m/s
-        # x, y, z acceleration (not supported yet, ignored in GCS_Mavlink)
-        0, 0, 0,
-        0, 0)  
-    vehicle.send_mavlink(msg)
-    time.sleep(.02)
+
+    # vehicle.send_mavlink(msg)
+    time.sleep(1)
 
 
 print("Setting LAND mode...")

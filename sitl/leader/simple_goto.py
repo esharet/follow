@@ -38,6 +38,9 @@ if not connection_string:
 print('Connecting to vehicle on: %s' % connection_string)
 vehicle = connect(connection_string, wait_ready=True)
 
+@vehicle.on_message('ATTITUDE_QUATERNION')
+def listener(self, name, message):
+    print(message)
 
 def arm_and_takeoff(aTargetAltitude):
     """
@@ -89,7 +92,7 @@ time.sleep(30)
 
 print("Going towards second point for 30 seconds (groundspeed set to 10 m/s) ...")
 point2 = LocationGlobalRelative(-35.363244, 149.168801, 20)
-vehicle.simple_goto(point2, groundspeed=10)
+vehicle.simple_goto(point2, groundspeed=5)
 
 # sleep so we can see the change in map
 time.sleep(30)
