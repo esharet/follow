@@ -446,18 +446,22 @@ arm_and_takeoff(5)
 The example is completing. LAND at current location.
 """
 vehicle.mode=VehicleMode("GUIDED")
-# currentLocation = vehicle.location.global_relative_frame
-# targetLocation = get_location_metres(currentLocation, 30, 30)
+
+#Velocity PID controller
 
 Vpid = PID(Kp=0.5, Ki=0.000, Kd=0, output_limits=(-25, 25))
-offset = 10
 
+#Required offset in meters
+offsetNorth = 100
+offsetEast = 0
+
+#Main loop
 while True:
     # print(180*vehicle.attitude.roll/3.14, 180 *
     #       vehicle.attitude.pitch/3.14, 180*vehicle.attitude.yaw/3.14)
 
     currentLocation = vehicle.location.global_frame
-    targetLocation = get_location_metres(leader_vehicle.location.global_frame, offset, 0)
+    targetLocation = get_location_metres(leader_vehicle.location.global_frame, offsetNorth, offsetEast)
     bearing = get_bearing(currentLocation, targetLocation)
     distance = get_distance_metres(currentLocation, targetLocation)
 
