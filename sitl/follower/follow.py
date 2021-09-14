@@ -1,14 +1,19 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-"""
-© Copyright 2015-2016, 3D Robotics.
-guided_set_speed_yaw.py: (Copter Only)
+#Based on http://python.dronekit.io/examples/guided-set-speed-yaw-demo.html
+#################################################################################################
+# Structure:
+# 1. Setup
+# 2. Function library
+# 3. Follower Script
+#################################################################################################
 
-This example shows how to move/direct Copter and send commands in GUIDED mode using DroneKit Python.
 
-Example documentation: http://python.dronekit.io/examples/guided-set-speed-yaw-demo.html
-"""
+#################################################################################################
+# Setup
+#################################################################################################
+
 
 from __future__ import print_function
 
@@ -16,8 +21,9 @@ from dronekit import connect, VehicleMode, LocationGlobal, LocationGlobalRelativ
 from pymavlink import mavutil  # Needed for command message definitions
 import time
 import math
+import numpy as np
 from simple_pid import PID
-
+from scipy.spatial.transform import Rotation as R
 
 # Set up option parsing to get connection string
 import argparse
@@ -46,6 +52,11 @@ vehicle = connect(connection_string, wait_ready=True, rate=50)
 leader_connection_string = ':14552'
 print('Connecting to leader on: %s' % leader_connection_string)
 leader_vehicle = connect(leader_connection_string, wait_ready=True, rate=50)
+
+
+#################################################################################################
+# Function library
+#################################################################################################
 
 
 def arm_and_takeoff(aTargetAltitude):
@@ -366,10 +377,9 @@ The methods include:
 """
 
 
-def send_ned_velocity(velocity_x, velocity_y, velocity_z, duration):
+def send_ned_velocity(velocity_x, velocity_y, velocity_z):
     """
-    Move vehicle in direction based on specified velocity vectors and
-    for the specified duration.
+    Move vehicle in direction based on specified velocity vector
 
     This uses the SET_POSITION_TARGET_LOCAL_NED command with a type mask enabling only 
     velocity components 
@@ -394,13 +404,10 @@ def send_ned_velocity(velocity_x, velocity_y, velocity_z, duration):
         0, 0, 0,
         0, 0)    # yaw, yaw_rate (not supported yet, ignored in GCS_Mavlink)
 
-    # send command to vehicle on 1 Hz cycle
-    for x in range(0, duration):
-        vehicle.send_mavlink(msg)
-        time.sleep(1)
+    vehicle.send_mavlink(msg)   
 
 
-def send_global_velocity(velocity_x, velocity_y, velocity_z, duration):
+def send_global_velocity(velocity_x, velocity_y, velocity_z):
     """
     Move vehicle in direction based on specified velocity vectors.
 
@@ -433,69 +440,116 @@ def send_global_velocity(velocity_x, velocity_y, velocity_z, duration):
         0, 0, 0,
         0, 0)    # yaw, yaw_rate (not supported yet, ignored in GCS_Mavlink)
 
-    # send command to vehicle on 1 Hz cycle
-    for x in range(0, duration):
-        vehicle.send_mavlink(msg)
-        time.sleep(1)
+    vehicle.send_mavlink(msg)
 
+def send_attitude_target(quaternion, yaw_rate = 0.0, use_yaw_rate = False,
+                         thrust = 0.5):
+    """
+    use_yaw_rate: the yaw can be controlled using yaw_angle OR yaw_rate.
+                  When one is used, the other is ignored by Ardupilot.
+    thrust: 0 <= thrust <= 1, as a fraction of maximum vertical thrust.
+            Note that as of Copter 3.5, thrust = 0.5 triggers a special case in
+            the code for maintaining current altitude.
+    """
+    # Thrust >  0.5: Ascend
+    # Thrust == 0.5: Hold the altitude
+    # Thrust <  0.5: Descend
+    #print(quaternion)
+    msg = vehicle.message_factory.set_attitude_target_encode(
+        0, # time_boot_ms
+        0, # Target system
+        0, # Target component
+        0b00000000 if use_yaw_rate else 0b00000100,
+        [quaternion[3],quaternion[0],quaternion[1],quaternion[2]], # Quaternion
+        0, # Body roll rate in radian
+        0, # Body pitch rate in radian
+        math.radians(yaw_rate), # Body yaw rate in radian/second
+        thrust  # Thrust
+    )
+    vehicle.send_mavlink(msg)
 
-# Arm and take of to altitude of 5 meters
-arm_and_takeoff(5)
-"""
+#################################################################################################
+# Follower script
+#################################################################################################
 
-The example is completing. LAND at current location.
-"""
-vehicle.mode=VehicleMode("GUIDED")
-# currentLocation = vehicle.location.global_relative_frame
-# targetLocation = get_location_metres(currentLocation, 30, 30)
+#########################
+#Setup 
+#########################
+arm_and_takeoff(50)
 
-Vpid = PID(Kp=0.5, Ki=0.000, Kd=0, output_limits=(-25, 25))
-offset = 10
+gps=False
 
+if gps:
+    vehicle.mode=VehicleMode("GUIDED")
+else:
+    vehicle.mode=VehicleMode("GUIDED_NOGPS")
+
+g=9.8
+
+#V_Kp=vehicle.parameters.get("FOLL_POS_P")
+V_Kp=vehicle.parameters.get("PSC_POSXY_P")
+print(f'V_Kp= {V_Kp:3.3f}[1/s]')
+V_Kd=10
+print(f'V_Kd= {V_Kd:3.3f}[1]')
+
+V_Max= vehicle.parameters.get("WPNAV_SPEED") / 100
+print(f'V_Max= {V_Max:3.3f}[m/s]')
+
+Angle_Max= vehicle.parameters.get("ANGLE_MAX") / 100
+print(f'Angle_Max= {Angle_Max:3.3f}[deg]')
+
+#Velocity PID controller
+Vpid = PID(Kp=V_Kp, Ki=0.000, Kd=V_Kd, output_limits=(-V_Max, V_Max))
+
+#Required offset in meters
+OffsetNorth = vehicle.parameters.get("FOLL_OFS_X")
+Offset_East = vehicle.parameters.get("FOLL_OFS_Y")
+print(f'OFFS= {OffsetNorth:3.3f},{Offset_East:3.3f}')
+
+#########################
+#Main loop
+#########################
 while True:
-    # print(180*vehicle.attitude.roll/3.14, 180 *
-    #       vehicle.attitude.pitch/3.14, 180*vehicle.attitude.yaw/3.14)
-
+    #Caluclate position error
     currentLocation = vehicle.location.global_frame
-    targetLocation = get_location_metres(leader_vehicle.location.global_frame, offset, 0)
+    targetLocation = get_location_metres(leader_vehicle.location.global_frame, OffsetNorth, Offset_East)
     bearing = get_bearing(currentLocation, targetLocation)
     distance = get_distance_metres(currentLocation, targetLocation)
 
-    # (x, y, z) = get_vector_meters(
-    #     leader_vehicle.location.global_frame, currentLocation)
-    # print(f"x: [{x}], y: [{y}], z: [{z}]")
-
+    #Position controller: Calculate Required velocity according to relative position
     speed = -Vpid(distance)
-    velocity_x = speed*math.cos(math.pi*bearing/180)
-    velocity_y = speed*math.sin(math.pi*bearing/180)
+    
+    #decrease speed to prevent overshoot
+    max_acceleration=0.5*g*math.tan(math.pi*Angle_Max/180) #Half the maximal possible acceleration
+    max_speed=math.sqrt(2.0 * distance * max_acceleration) 
+    if (speed > max_speed): 
+            speed = max_speed
+              
+    #unit vector toward target point
+    ux=math.cos(math.pi*bearing/180)
+    uy=math.sin(math.pi*bearing/180)
+    
+    #required vlocity vector
+    velocity_x = speed*ux
+    velocity_y = speed*uy
     velocity_z = 0
 
     # print(f'Bearing, {bearing:5.0f}, Distance: {distance:5.1f} Vx: {velocity_x:5.1f}, Vy: {velocity_y:5.1f}' )
 
-    # msg = vehicle.message_factory.set_position_target_local_ned_encode(
-    #     0,       # time_boot_ms (not used)
-    #     0, 0,    # target system, target component
-    #     mavutil.mavlink.MAV_FRAME_LOCAL_NED,  # frame
-    #     0b0000111111000111,  # type_mask (only speeds enabled)
-    #     0, 0, 20,  # x, y, z positions (not used)
-    #     velocity_x, velocity_y, velocity_z,  # x, y, z velocity in m/s
-    #     # x, y, z acceleration (not supported yet, ignored in GCS_Mavlink)
-    #     0, 0, 0,
-    #     0, 0)    # yaw, yaw_rate (not supported yet, ignored in GCS_Mavlink)
-    msg = vehicle.message_factory.set_position_target_local_ned_encode(
-        0,       # time_boot_ms (not used)
-        0, 0,    # target system, target component
-        mavutil.mavlink.MAV_FRAME_LOCAL_NED,  # frame
-        0b0000111111000111,  # type_mask (only speeds enabled)
-        0, 0, 20,  # x, y, z positions (not used)
-        velocity_x, velocity_y, velocity_z,  # x, y, z velocity in m/s
-        # x, y, z acceleration (not supported yet, ignored in GCS_Mavlink)
-        0, 0, 0,
-        0, 0)  
-    vehicle.send_mavlink(msg)
+    if gps: 
+        send_ned_velocity(velocity_x, velocity_y, 0)
+    else:
+        #a very naive velocity controller
+        #Velocity controller: calculate inclination according to required velocity
+        rotation_vector=-(R.from_rotvec([0,0,np.pi/2])).apply([ux,uy,0])
+        inclination=(np.pi/180)*Angle_Max*speed/V_Max 
+        quaternion=R.from_rotvec(inclination*rotation_vector).as_quat()
+        send_attitude_target(quaternion)
+
+    #We run roughly on 50Hz
     time.sleep(.02)
 
-
+# We never Get Past Here
 print("Setting LAND mode...")
 vehicle.mode = VehicleMode("LAND")
 
