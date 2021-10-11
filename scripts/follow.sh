@@ -8,6 +8,6 @@ tmux neww -n "follower"  -d sim_vehicle.py -v Copter -I1 -m --streamrate=-1 -m -
 tmux split -t follower  
 
 cd ..
-tmux neww -n "mavproxy" -d  mavproxy.py --master :14550 --master :14560 --map --console  --target-system=2 --streamrate=-1 
+tmux neww -n "mavproxy" -d  mavproxy.py --master :14550 --master :14560 --map --console  --target-system=1 --streamrate=-1 
 
 tmux att

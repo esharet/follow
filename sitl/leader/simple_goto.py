@@ -97,8 +97,8 @@ vehicle.simple_goto(point2, groundspeed=5)
 # sleep so we can see the change in map
 time.sleep(30)
 
-print("Returning to Launch")
-vehicle.mode = VehicleMode("RTL")
+# print("Returning to Launch")
+# vehicle.mode = VehicleMode("RTL")
 
 # Close vehicle object before exiting script
 print("Close vehicle object")

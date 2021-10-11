@@ -17,6 +17,7 @@ from __future__ import print_function
 
 from dronekit import connect, VehicleMode, LocationGlobal, LocationGlobalRelative
 from matplotlib import markers
+from numpy.core.numeric import True_
 from pymavlink import mavutil  # Needed for command message definitions
 import time
 import math
@@ -474,12 +475,10 @@ def send_attitude_target(quaternion, yaw_rate=0.0, use_yaw_rate=False,
 #########################
 # Setup
 #########################
-
-
 g = 9.8
 
 #POS_P=vehicle.parameters.get("FOLL_POS_P")
-POS_P = vehicle.parameters.get("PSC_POSXY_P")/2
+POS_P = vehicle.parameters.get("PSC_POSXY_P")
 POS_D = 0
 
 
@@ -490,8 +489,10 @@ Angle_Max = vehicle.parameters.get("ANGLE_MAX") / 100
 print(f'Angle_Max= {Angle_Max:3.3f}[deg]')
 
 # Velocity PID controller
-POSpid = PID(kp=POS_P, kd=POS_D)
-print(POSpid)
+POSXpid = PID(kp=POS_P, kd=POS_D)
+POSYpid = PID(kp=POS_P, kd=POS_D)
+print(POSXpid)
+print(POSYpid)
 
 # Required offset in meters
 Offset_North = vehicle.parameters.get("FOLL_OFS_X")
@@ -500,11 +501,15 @@ print(f'OFFS= {Offset_North:3.3f},{Offset_East:3.3f}')
 
 VEL_P = vehicle.parameters.get("PSC_VELXY_P")
 VEL_I = vehicle.parameters.get("PSC_VELXY_I")
-VEL_IMAX = vehicle.parameters.get("PSC_VELXY_IMAX")
+VEL_IMAX = vehicle.parameters.get("PSC_VELXY_IMAX")/100
 VEL_D = vehicle.parameters.get("PSC_VELXY_D")
 VEL_FF = vehicle.parameters.get("PSC_VELXY_FF")
-VELpid = PID(kp=VEL_P, ki=VEL_I, kd=VEL_D, ki_max=VEL_IMAX, kff=VEL_FF)
-print(VELpid)
+VEL_D_FILT = vehicle.parameters.get("PSC_VELXY_D_FILT")
+VEL_FILT = vehicle.parameters.get("PSC_VELXY_FILT")
+VELXpid = PID(kp=VEL_P, ki=VEL_I, kd=VEL_D, ki_max=VEL_IMAX, kff=VEL_FF,filt_D_hz=VEL_D_FILT,filt_E_hz=VEL_FILT)
+VELYpid = PID(kp=VEL_P, ki=VEL_I, kd=VEL_D, ki_max=VEL_IMAX, kff=VEL_FF,filt_D_hz=VEL_D_FILT,filt_E_hz=VEL_FILT)
+print(VELXpid)
+print(VELYpid)
 
 # Half the maximal possible acceleration
 max_acceleration = g*math.tan(math.pi*Angle_Max/180)
@@ -524,55 +529,74 @@ else:
 
 # We run roughly on 50Hz
 reset = True
-dt = 0.02
+dt = 0.05
 prev_time = time.monotonic()
 while True:
     # Caluclate position error
     currentLocation = vehicle.location.global_frame
     targetLocation = get_location_metres(
         leader_vehicle.location.global_frame, Offset_North, Offset_East)
-    bearing = get_bearing(currentLocation, targetLocation)
-    distance = get_distance_metres(currentLocation, targetLocation)
+    
+    #bearing = get_bearing(currentLocation, targetLocation)
+    #distance = get_distance_metres(currentLocation, targetLocation)
+    (dx,dy,dz)=get_vector_meters(currentLocation, targetLocation)
+    distance=np.sqrt(dx*dx+dy*dy)
 
     # Position controller: Calculate Required velocity according to relative position
-    speed = -POSpid(distance, dt=dt)
+    vx = -POSXpid(dx, dt=dt)
+    vy = -POSYpid(dy, dt=dt)
+    speed= np.sqrt(vx*vx+vy*vy)
+    # unit vector toward target point
+    if speed!=0:
+        ux = vx/speed
+        uy = vy/speed
+    else: 
+        ux=1
+        uy=0
 
     # decrease speed to prevent overshoot
     max_speed = math.sqrt(2.0 * distance * 0.5*max_acceleration)
     if (speed > max_speed):
         speed = max_speed
-
-    # unit vector toward target point
-    ux = math.cos(math.pi*bearing/180)
-    uy = math.sin(math.pi*bearing/180)
-
-    # required vlocity vector
-    velocity_x = speed*ux
-    velocity_y = speed*uy
-    velocity_z = 0
+    vx=speed*ux
+    vy=speed*uy
+    vz = 0
 
     # print(f'Bearing, {bearing:5.0f}, Distance: {distance:5.1f} Vx: {velocity_x:5.1f}, Vy: {velocity_y:5.1f}' )
-
     if gps:
-        send_ned_velocity(velocity_x, velocity_y, 0)
+        send_ned_velocity(vx, vy, 0)
     else:
         # Velocity controller: calculate acceleration according to required velocity
         if reset == True:
             reset=False
-            actual_speed = speed
+            actual_vx = vx
+            actual_vy = vy
         else:
-            actual_speed = (distance-prev_distance)/dt
-        prev_distance = distance
-        acceleration = VELpid(measurment=actual_speed, target=speed, dt=dt)
+            actual_vx = (dx-prev_dx)/dt
+            actual_vy = (dy-prev_dy)/dt
+        prev_dx = dx
+        prev_dy = dy
+        ax= VELXpid(measurment=actual_vx, target=vx, dt=dt)
+        ay= VELYpid(measurment=actual_vy, target=vy, dt=dt)
+        acceleration=np.sqrt(ax*ax+ay*ay)
+        if (acceleration!=0.0): 
+            uax=ax/acceleration
+            uay=ay/acceleration
+        else:
+            uax=1
+            uay=0
+        acceleration=min(acceleration,max_acceleration)
+        ax=uax*acceleration
+        ay=uay*acceleration
         # Acceleration controller: calculate inclination according to required acceleration
-        rotation_vector = -(R.from_rotvec([0, 0, np.pi/2])).apply([ux, uy, 0])
+        rotation_vector = -(R.from_rotvec([0, 0, np.pi/2])).apply([uax, uay, 0])
         inclination = np.arctan(acceleration / g)
         quaternion = R.from_rotvec(inclination*rotation_vector).as_quat()
         send_attitude_target(quaternion)
 
     now = time.monotonic()
     sleep=dt-(now-prev_time)
-    if sleep>0: time.sleep(dt-(now-prev_time))
+    if sleep>0: time.sleep(sleep)
     prev_time = time.monotonic()
 # We never Get Past Here
 print("Setting LAND mode...")
