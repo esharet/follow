@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-#Based on http://python.dronekit.io/examples/guided-set-speed-yaw-demo.html
+# Based on http://python.dronekit.io/examples/guided-set-speed-yaw-demo.html
 #################################################################################################
 # Structure:
 # 1. Setup
@@ -13,16 +13,15 @@
 #################################################################################################
 # Setup
 #################################################################################################
-
-
 from __future__ import print_function
 
 from dronekit import connect, VehicleMode, LocationGlobal, LocationGlobalRelative
+from matplotlib import markers
 from pymavlink import mavutil  # Needed for command message definitions
 import time
 import math
 import numpy as np
-from simple_pid import PID
+from my_pid import PID
 from scipy.spatial.transform import Rotation as R
 
 # Set up option parsing to get connection string
@@ -57,8 +56,6 @@ leader_vehicle = connect(leader_connection_string, wait_ready=True, rate=50)
 #################################################################################################
 # Function library
 #################################################################################################
-
-
 def arm_and_takeoff(aTargetAltitude):
     """
     Arms vehicle and fly to aTargetAltitude.
@@ -404,7 +401,7 @@ def send_ned_velocity(velocity_x, velocity_y, velocity_z):
         0, 0, 0,
         0, 0)    # yaw, yaw_rate (not supported yet, ignored in GCS_Mavlink)
 
-    vehicle.send_mavlink(msg)   
+    vehicle.send_mavlink(msg)
 
 
 def send_global_velocity(velocity_x, velocity_y, velocity_z):
@@ -442,8 +439,9 @@ def send_global_velocity(velocity_x, velocity_y, velocity_z):
 
     vehicle.send_mavlink(msg)
 
-def send_attitude_target(quaternion, yaw_rate = 0.0, use_yaw_rate = False,
-                         thrust = 0.5):
+
+def send_attitude_target(quaternion, yaw_rate=0.0, use_yaw_rate=False,
+                         thrust=0.5):
     """
     use_yaw_rate: the yaw can be controlled using yaw_angle OR yaw_rate.
                   When one is used, the other is ignored by Ardupilot.
@@ -454,16 +452,16 @@ def send_attitude_target(quaternion, yaw_rate = 0.0, use_yaw_rate = False,
     # Thrust >  0.5: Ascend
     # Thrust == 0.5: Hold the altitude
     # Thrust <  0.5: Descend
-    #print(quaternion)
+    # print(quaternion)
     msg = vehicle.message_factory.set_attitude_target_encode(
-        0, # time_boot_ms
-        0, # Target system
-        0, # Target component
+        0,  # time_boot_ms
+        0,  # Target system
+        0,  # Target component
         0b00000000 if use_yaw_rate else 0b00000100,
-        [quaternion[3],quaternion[0],quaternion[1],quaternion[2]], # Quaternion
-        0, # Body roll rate in radian
-        0, # Body pitch rate in radian
-        math.radians(yaw_rate), # Body yaw rate in radian/second
+        [quaternion[3], quaternion[0], quaternion[1], quaternion[2]],  # Quaternion
+        0,  # Body roll rate in radian
+        0,  # Body pitch rate in radian
+        math.radians(yaw_rate),  # Body yaw rate in radian/second
         thrust  # Thrust
     )
     vehicle.send_mavlink(msg)
@@ -472,83 +470,110 @@ def send_attitude_target(quaternion, yaw_rate = 0.0, use_yaw_rate = False,
 # Follower script
 #################################################################################################
 
+
 #########################
-#Setup 
+# Setup
 #########################
-arm_and_takeoff(50)
 
-gps=False
 
-if gps:
-    vehicle.mode=VehicleMode("GUIDED")
-else:
-    vehicle.mode=VehicleMode("GUIDED_NOGPS")
+g = 9.8
 
-g=9.8
+#POS_P=vehicle.parameters.get("FOLL_POS_P")
+POS_P = vehicle.parameters.get("PSC_POSXY_P")/2
+POS_D = 0
 
-#V_Kp=vehicle.parameters.get("FOLL_POS_P")
-V_Kp=vehicle.parameters.get("PSC_POSXY_P")
-print(f'V_Kp= {V_Kp:3.3f}[1/s]')
-V_Kd=10
-print(f'V_Kd= {V_Kd:3.3f}[1]')
 
-V_Max= vehicle.parameters.get("WPNAV_SPEED") / 100
+V_Max = vehicle.parameters.get("WPNAV_SPEED") / 100
 print(f'V_Max= {V_Max:3.3f}[m/s]')
 
-Angle_Max= vehicle.parameters.get("ANGLE_MAX") / 100
+Angle_Max = vehicle.parameters.get("ANGLE_MAX") / 100
 print(f'Angle_Max= {Angle_Max:3.3f}[deg]')
 
-#Velocity PID controller
-Vpid = PID(Kp=V_Kp, Ki=0.000, Kd=V_Kd, output_limits=(-V_Max, V_Max))
+# Velocity PID controller
+POSpid = PID(kp=POS_P, kd=POS_D)
+print(POSpid)
 
-#Required offset in meters
-OffsetNorth = vehicle.parameters.get("FOLL_OFS_X")
+# Required offset in meters
+Offset_North = vehicle.parameters.get("FOLL_OFS_X")
 Offset_East = vehicle.parameters.get("FOLL_OFS_Y")
-print(f'OFFS= {OffsetNorth:3.3f},{Offset_East:3.3f}')
+print(f'OFFS= {Offset_North:3.3f},{Offset_East:3.3f}')
+
+VEL_P = vehicle.parameters.get("PSC_VELXY_P")
+VEL_I = vehicle.parameters.get("PSC_VELXY_I")
+VEL_IMAX = vehicle.parameters.get("PSC_VELXY_IMAX")
+VEL_D = vehicle.parameters.get("PSC_VELXY_D")
+VEL_FF = vehicle.parameters.get("PSC_VELXY_FF")
+VELpid = PID(kp=VEL_P, ki=VEL_I, kd=VEL_D, ki_max=VEL_IMAX, kff=VEL_FF)
+print(VELpid)
+
+# Half the maximal possible acceleration
+max_acceleration = g*math.tan(math.pi*Angle_Max/180)
+print(f'max_acceleration= {max_acceleration:3.3f}[m/s^2]')
+
 
 #########################
-#Main loop
+# Main loop
 #########################
+arm_and_takeoff(50)
+gps = False
+
+if gps:
+    vehicle.mode = VehicleMode("GUIDED")
+else:
+    vehicle.mode = VehicleMode("GUIDED_NOGPS")
+
+# We run roughly on 50Hz
+reset = True
+dt = 0.02
+prev_time = time.monotonic()
 while True:
-    #Caluclate position error
+    # Caluclate position error
     currentLocation = vehicle.location.global_frame
-    targetLocation = get_location_metres(leader_vehicle.location.global_frame, OffsetNorth, Offset_East)
+    targetLocation = get_location_metres(
+        leader_vehicle.location.global_frame, Offset_North, Offset_East)
     bearing = get_bearing(currentLocation, targetLocation)
     distance = get_distance_metres(currentLocation, targetLocation)
 
-    #Position controller: Calculate Required velocity according to relative position
-    speed = -Vpid(distance)
-    
-    #decrease speed to prevent overshoot
-    max_acceleration=0.5*g*math.tan(math.pi*Angle_Max/180) #Half the maximal possible acceleration
-    max_speed=math.sqrt(2.0 * distance * max_acceleration) 
-    if (speed > max_speed): 
-            speed = max_speed
-              
-    #unit vector toward target point
-    ux=math.cos(math.pi*bearing/180)
-    uy=math.sin(math.pi*bearing/180)
-    
-    #required vlocity vector
+    # Position controller: Calculate Required velocity according to relative position
+    speed = -POSpid(distance, dt=dt)
+
+    # decrease speed to prevent overshoot
+    max_speed = math.sqrt(2.0 * distance * 0.5*max_acceleration)
+    if (speed > max_speed):
+        speed = max_speed
+
+    # unit vector toward target point
+    ux = math.cos(math.pi*bearing/180)
+    uy = math.sin(math.pi*bearing/180)
+
+    # required vlocity vector
     velocity_x = speed*ux
     velocity_y = speed*uy
     velocity_z = 0
 
     # print(f'Bearing, {bearing:5.0f}, Distance: {distance:5.1f} Vx: {velocity_x:5.1f}, Vy: {velocity_y:5.1f}' )
 
-    if gps: 
+    if gps:
         send_ned_velocity(velocity_x, velocity_y, 0)
     else:
-        #a very naive velocity controller
-        #Velocity controller: calculate inclination according to required velocity
-        rotation_vector=-(R.from_rotvec([0,0,np.pi/2])).apply([ux,uy,0])
-        inclination=(np.pi/180)*Angle_Max*speed/V_Max 
-        quaternion=R.from_rotvec(inclination*rotation_vector).as_quat()
+        # Velocity controller: calculate acceleration according to required velocity
+        if reset == True:
+            reset=False
+            actual_speed = speed
+        else:
+            actual_speed = (distance-prev_distance)/dt
+        prev_distance = distance
+        acceleration = VELpid(measurment=actual_speed, target=speed, dt=dt)
+        # Acceleration controller: calculate inclination according to required acceleration
+        rotation_vector = -(R.from_rotvec([0, 0, np.pi/2])).apply([ux, uy, 0])
+        inclination = np.arctan(acceleration / g)
+        quaternion = R.from_rotvec(inclination*rotation_vector).as_quat()
         send_attitude_target(quaternion)
 
-    #We run roughly on 50Hz
-    time.sleep(.02)
-
+    now = time.monotonic()
+    sleep=dt-(now-prev_time)
+    if sleep>0: time.sleep(dt-(now-prev_time))
+    prev_time = time.monotonic()
 # We never Get Past Here
 print("Setting LAND mode...")
 vehicle.mode = VehicleMode("LAND")
