@@ -5,6 +5,7 @@ def calc_lowpass(dt, cutoff_freq):
     if cutoff_freq <= 0.0:
         return 1.0
     rc = 1.0/(2*np.pi*cutoff_freq)
+    #print(dt,rc)
     return dt/(dt+rc)
 
 
@@ -43,20 +44,21 @@ class PID:
             self.derivative = 0.0
             if dt <= 0.0:
                 self.last_time = time.monotonic()
-                dt = 0.0
         else:
             if dt <= 0:
                 now = time.monotonic()
-                dt = self.last_time-now
+                dt = now-self.last_time
                 self.last_time = now
             error_last = self.error
             self.error += calc_lowpass(dt, self.filt_E_hz) * \
                 (self.target-measurment-self.error)
-            derivative = (self.error-error_last)/dt
+            if (dt>0.0): derivative = (self.error-error_last)/dt
+            #else, do not change dt. We should never get here...
             self.derivative += calc_lowpass(dt,
                                             self.filt_D_hz)*(derivative-self.derivative)
             self.integrator += self.error*dt*self.ki
             self.integrator = constrain(self.integrator, self.ki_max)
+        #print(calc_lowpass(dt, self.filt_E_hz), dt, self.filt_E_hz)
         return self.error*self.kp+self.integrator+self.derivative*self.kd+self.target*self.kff
 
     def __repr__(self):

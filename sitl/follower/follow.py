@@ -519,7 +519,7 @@ print(f'max_acceleration= {max_acceleration:3.3f}[m/s^2]')
 #########################
 # Main loop
 #########################
-arm_and_takeoff(50)
+arm_and_takeoff(5)
 gps = False
 
 if gps:
@@ -529,9 +529,12 @@ else:
 
 # We run roughly on 50Hz
 reset = True
-dt = 0.05
 prev_time = time.monotonic()
 while True:
+    time.sleep(0.02)
+    now = time.monotonic()
+    dt=now-prev_time
+    prev_time = now
     # Caluclate position error
     currentLocation = vehicle.location.global_frame
     targetLocation = get_location_metres(
@@ -543,8 +546,8 @@ while True:
     distance=np.sqrt(dx*dx+dy*dy)
 
     # Position controller: Calculate Required velocity according to relative position
-    vx = -POSXpid(dx, dt=dt)
-    vy = -POSYpid(dy, dt=dt)
+    vx = -POSXpid(dx)
+    vy = -POSYpid(dy)
     speed= np.sqrt(vx*vx+vy*vy)
     # unit vector toward target point
     if speed!=0:
@@ -576,8 +579,9 @@ while True:
             actual_vy = (dy-prev_dy)/dt
         prev_dx = dx
         prev_dy = dy
-        ax= VELXpid(measurment=actual_vx, target=vx, dt=dt)
-        ay= VELYpid(measurment=actual_vy, target=vy, dt=dt)
+        ax= VELXpid(measurment=actual_vx, target=vx)
+        ay= VELYpid(measurment=actual_vy, target=vy)
+        #print(ax,ay)
         acceleration=np.sqrt(ax*ax+ay*ay)
         if (acceleration!=0.0): 
             uax=ax/acceleration
@@ -593,11 +597,7 @@ while True:
         inclination = np.arctan(acceleration / g)
         quaternion = R.from_rotvec(inclination*rotation_vector).as_quat()
         send_attitude_target(quaternion)
-
-    now = time.monotonic()
-    sleep=dt-(now-prev_time)
-    if sleep>0: time.sleep(sleep)
-    prev_time = time.monotonic()
+    
 # We never Get Past Here
 print("Setting LAND mode...")
 vehicle.mode = VehicleMode("LAND")

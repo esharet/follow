@@ -1,0 +1,1 @@
+/home/esharet/Arduino/variant/generic_clock.c
