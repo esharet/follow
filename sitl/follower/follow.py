@@ -575,8 +575,10 @@ while True:
             actual_vx = vx
             actual_vy = vy
         else:
-            actual_vx = (dx-prev_dx)/dt
-            actual_vy = (dy-prev_dy)/dt
+            if (dt>0.0):
+                actual_vx = (dx-prev_dx)/dt
+                actual_vy = (dy-prev_dy)/dt
+            #else keep last value of actual vx and vy
         prev_dx = dx
         prev_dy = dy
         ax= VELXpid(measurment=actual_vx, target=vx)
